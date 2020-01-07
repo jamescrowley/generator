@@ -67,7 +67,7 @@ public class {{ className }} {
 		return this;
 	}
 
-	// Listers
+	// Listeners
 
 	public interface SubscribeListener {
 		public void onReceive({{ className }} {{ lowerMessageName }});
