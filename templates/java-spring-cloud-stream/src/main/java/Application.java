@@ -7,51 +7,52 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Bean;
 import org.springframework.messaging.Message;
+import org.springframework.messaging.support.MessageBuilder;
+import reactor.core.publisher.EmitterProcessor;
+import reactor.core.publisher.Flux;
+
+import java.util.function.Consumer;
+import java.util.function.Supplier;
+import java.util.Map;
 
 @SpringBootApplication
-public class Application implements CommandLineRunner {
+public class Application {
 
 	private static final Logger log = LoggerFactory.getLogger(Application.class);
-
-	@Autowired
-	private Messaging messaging;
 
 	public static void main(String[] args) {
 		SpringApplication.run(Application.class);
 	}
-
-	@Override
-	public void run(String... args) throws Exception {
 {% for channelName, channel in asyncapi.channels() -%}
-{%- if channel.hasSubscribe() %}
-{%- set name = [channelName, channel] | functionName %}
-{%- set upperName = name | upperFirst %}
-		messaging.set{{upperName}}Callback(this::receive);
-{%- endif %}
-{%- endfor %}
-
-		while (true) {
-{%- for channelName, channel in asyncapi.channels() -%}
-{%- if channel.hasPublish() %}
-{%- set name = [channelName, channel] | functionName %}
-{%- set upperName = name | upperFirst %}
-{%- set payloadClass = [channelName, channel] | payloadClass %}
-{%- set payloadName = name + "Payload" %}
+{%- set name = [channelName, channel] | functionName -%}
+{%- set upperName = name | upperFirst -%}
+{%- set payloadClass = [channelName, channel] | payloadClass -%}
+{%- set lowerPayloadName = payloadClass | lowerFirst -%}
 {%- set topicInfo = [channelName, channel] | topicInfo %}
-			{{payloadClass}} {{payloadName}} = new {{payloadClass}}();
-			messaging.send{{upperName}}( {{payloadName}}{{topicInfo.sampleArgList}} );
+	// channel: {{ channelName }}
+{% for param in topicInfo.params -%}
+{%- if param.enum %}
+    public static enum {{ param.type }} { {{ param.enum }} }
+{% endif -%}
+{%- endfor -%}
+{%- if channel.hasPublish() %}
+	// publisher
+{%- set emitterName = name + "EmitterProcessor" %}
+	EmitterProcessor<Message<{{payloadClass}}>> {{emitterName}} = EmitterProcessor.create();
+
+	@Bean
+	public Supplier<Flux<Message<{{payloadClass}}>>> {{name}}Supplier() {
+		return () -> {{emitterName}};
+	}
+{% endif -%}
+{%- if channel.hasSubscribe() %}
+	// subscriber
+	@Bean
+	Consumer<Message<{{payloadClass}}>> {{name}}Consumer() {
+		return message -> { };
+	}
 {% endif %}
 {%- endfor %}
-			Thread.sleep(1000);
-		}
-
-	}
-
-	public void receive(Message<?> message) {
-		Object payload = message.getPayload();
-		log.info("Received a message: " + payload);
-	}
-
 }
