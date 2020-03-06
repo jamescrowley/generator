@@ -18,7 +18,7 @@ module.exports = ({ Nunjucks }) => {
   sampleMap.set('boolean', 'true');
   sampleMap.set('integer', '1');
   sampleMap.set('null', 'string');
-  sampleMap.set('number', '1.1');
+  sampleMap.set('number', '1');
   sampleMap.set('string', '"string"');
 
   // This maps json schema types to Java types.
@@ -26,8 +26,52 @@ module.exports = ({ Nunjucks }) => {
   typeMap.set('boolean', 'Boolean');
   typeMap.set('integer', 'Integer');
   typeMap.set('null', 'String');
-  typeMap.set('number', 'Double');
+  typeMap.set('number', 'int');
   typeMap.set('string', 'String');
+
+  class SCSFunction {
+    name;
+    type;
+    publishChannel;
+    subscribeChannel;
+    publishPayload;
+    subscribePayload;
+
+    get publishBindingName() {
+      return this.name + "-out-0";
+    }
+
+    get subscribeBindingName() {
+      return this.name + "-in-0";
+    }
+
+    get functionSignature() {
+      var ret = '';
+      switch(this.type) {
+        case 'function':
+          ret = `public Function<Flux<${this.subscribePayload}>, Flux<${this.publishPayload}>> ${this.name}()`;
+          break;
+        case 'supplier':
+          ret = `public Supplier<${this.publishPayload}> ${this.name}()`;
+          break;
+        case 'consumer':
+          ret = `public Consumer<${this.subscribePayload}> ${this.name}()`;
+          break;
+        default:
+          throw new Error(`Can't determine the function signature for ${this.name} because the type is ${this.type}`);
+      }
+      return ret;
+    }
+
+    get isPublisher() {
+      return this.type === 'function' || this.type === 'supplier';
+    }
+
+    get isSubscriber() {
+      return this.type === 'function' || this.type === 'consumer';
+    }
+
+  }
 
   // This generates the object that gets rendered in the application.yaml file.
   Nunjucks.addFilter('appProperties', ([asyncapi, params]) => {
@@ -43,7 +87,7 @@ module.exports = ({ Nunjucks }) => {
     let scs = doc.spring.cloud.stream;
     scs.function = {};
     scs.function.definition = getFunctionDefinitions(asyncapi);
-    scs.bindings = getBindings(asyncapi, params);
+    scs.bindings = getBindings(asyncapi);
 
     if (params.binder === 'solace') {
       let additionalSubs = getAdditionalSubs(asyncapi);
@@ -90,7 +134,7 @@ module.exports = ({ Nunjucks }) => {
 
   // This determines the base function name that we will use for the SCSt mapping between functions and bindings.
   Nunjucks.addFilter('functionName', ([channelName, channel]) => {
-    return getFunctionName(channelName, channel);
+    return getFunctionNameOld(channelName, channel);
   })
 
   Nunjucks.addFilter('indent1', (numTabs) => {
@@ -152,6 +196,10 @@ module.exports = ({ Nunjucks }) => {
     return [ret, isArrayOfObjects];
   })
 
+  Nunjucks.addFilter('functions', (asyncapi) => {
+    return getFunctionSpecs(asyncapi);
+  });
+
   Nunjucks.addFilter('groupId', ([info, params]) => {
     return getParamOrExtension(info, params, 'groupId', 'x-group-id', 'Maven group ID.', 'com.company');
   })
@@ -159,6 +207,11 @@ module.exports = ({ Nunjucks }) => {
   Nunjucks.addFilter('lowerFirst', (str) => {
     return _.lowerFirst(str);
   })
+
+  Nunjucks.addFilter('mainClassName', ([info, params]) => {
+    let  ret = info.extensions()['x-java-class'] || "Application";
+    return ret;
+  });
 
   // This returns the Java class name of the payload.
   Nunjucks.addFilter('payloadClass', ([channelName, channel]) => {
@@ -204,6 +257,7 @@ module.exports = ({ Nunjucks }) => {
   }
 
   // For the Solace binder. This determines the topic that must be subscribed to on a queue, when the x-scs-destination is given (which is the queue name.)
+  // TODO: Make this work with the new FunctionSpec stuff.
   function getAdditionalSubs(asyncapi) {
     let ret;
 
@@ -212,7 +266,7 @@ module.exports = ({ Nunjucks }) => {
       let channelJson = channel._json;
       
       if (channelJson.subscribe) {
-        let functionName = getFunctionName(channelName, channel);
+        let functionName = getFunctionNameOld(channelName, channel);
         let topicInfo = getTopicInfo(channelName, channel);
         let queue = channelJson.subscribe['x-scs-destination'];
         if (topicInfo.hasParams || queue) {
@@ -232,13 +286,31 @@ module.exports = ({ Nunjucks }) => {
   }
 
   // This returns the SCSt bindings config that will appear in application.yaml.
-  function getBindings(asyncapi, params) {
+  function getBindings(asyncapi ) {
+    let ret = {};
+    let funcs = getFunctionSpecs(asyncapi);
+
+    funcs.forEach((spec, name, map) => {
+      if (spec.isPublisher) {
+        ret[spec.publishBindingName] = {};
+        ret[spec.publishBindingName].destination = spec.publishChannel;
+      }
+      if (spec.isSubscriber) {
+        ret[spec.subscribeBindingName] = {};
+        ret[spec.subscribeBindingName].destination = spec.subscribeChannel;
+      }
+    });
+    return ret;
+  }
+
+  // This returns the SCSt bindings config that will appear in application.yaml.
+  function getBindingsOld(asyncapi, params) {
     let ret = {};
 
     for (let channelName in asyncapi.channels()) {
       let channel = asyncapi.channels()[channelName];
       let channelJson = channel._json;
-      let functionName = getFunctionName(channelName, channel);
+      let functionName = getFunctionNameOld(channelName, channel);
       //console.log("topicFunc: " + topicFunc);
       //console.log("channelName: " + channelName);
       //console.log("channelJson: " + channelJson);
@@ -278,7 +350,21 @@ module.exports = ({ Nunjucks }) => {
   }
 
   // This returns the base function name that SCSt will use to map functions with bindings.
-  function getFunctionName(channelName, channel) {
+  function getFunctionName(channelName, operation, isSubscribe) {
+    let ret;
+    //console.log('functionName operation: ' + JSON.stringify(operation));
+    let functionName = operation['x-scs-function-name'];
+    //console.log('function name for operation ' + channelName + ': ' + functionName);
+    if (functionName) {
+      ret = functionName;
+    } else {
+      ret = _.camelCase(channelName) + (isSubscribe ? "Consumer" : "Provider");
+    }
+    return ret;
+  }
+
+  // This returns the base function name that SCSt will use to map functions with bindings.
+  function getFunctionNameOld(channelName, channel) {
     let ret = _.camelCase(channelName);
     let channelJson = channel._json;
     //console.log('functionName channel: ' + JSON.stringify(channelJson));
@@ -293,19 +379,65 @@ module.exports = ({ Nunjucks }) => {
   // This returns the string that gets rendered in the function.definition part of application.yaml.
   function getFunctionDefinitions(asyncapi) {
     let ret = "";
+    let funcs = getFunctionSpecs(asyncapi);
+    let names = funcs.keys();
+    ret = Array.from(names).join(";");
+    return ret;
+  }
+
+  function getFunctionSpecs(asyncapi) {
+    // This maps function names to SCS function definitions.
+    const functionMap = new Map();
 
     for (let channelName in asyncapi.channels()) {
       let channel = asyncapi.channels()[channelName];
       let channelJson = channel._json;
-      let functionName = getFunctionName(channelName, channel);
+      let functionSpec;
       if (channelJson.publish) {
-        ret += functionName + "Supplier;";
+        let name = getFunctionName(channelName, channelJson.publish, false);
+        functionSpec = functionMap.get(name);
+        if (functionSpec) {
+          if (functionSpec.type === 'supplier' || functionSpec === 'function') {
+            throw new Error(`Function ${name} can't publish to both channels {a.channel} and ${channelName}.`);
+          }
+          functionSpec.type = 'function';
+        } else {
+          functionSpec = new SCSFunction();
+          functionSpec.name = name;
+          functionSpec.type = 'supplier'
+          functionMap.set(name, functionSpec);
+        }
+        let payload = getPayloadClass(channel.publish());
+        if (!payload) {
+          throw new Error("Channel " + channelName + ": no payload class has been defined.");
+        }
+        functionSpec.publishPayload = payload;
+        functionSpec.publishChannel = channelName;
       }
       if (channelJson.subscribe) {
-        ret += functionName + "Consumer;";
+        let name = getFunctionName(channelName, channelJson.subscribe, true);
+        functionSpec = functionMap.get(name);
+        if (functionSpec) {
+          if (functionSpec.type === 'consumer' || functionSpec === 'function') {
+            throw new Error(`Function ${name} can't subscribe to both channels {functionSpec.channel} and ${channelName}.`);
+          }
+          functionSpec.type = 'function'
+        } else {
+          functionSpec = new SCSFunction();
+          functionSpec.name = name;
+          functionSpec.type = 'consumer';
+          functionMap.set(name, functionSpec);
+        }
+        let payload = getPayloadClass(channel.subscribe());
+        if (!payload) {
+          throw new Error("Channel " + channelName + ": no payload class has been defined.");
+        }
+        functionSpec.subscribePayload = payload;
+        functionSpec.subscribeChannel = channelName;
       }
     }
-    return ret;
+
+    return functionMap;
   }
 
   // This returns the value of a param, or specification extention if the param isn't set. If neither are set it throws an error.

@@ -13,16 +13,14 @@ module.exports = register => {
     let package = generator.templateParams['javaPackage'];
     let generateMessagingClass = false;
     let gen = generator.templateParams['generateMessagingClass'];
+    let extensions = info.extensions();
 
     if (gen === 'true') {
       generateMessagingClass = true;
     }
 
-    if (!package && info) {
-      const extensions = info.extensions();
-      if (extensions) {
-        package = extensions['x-java-package'];
-      }
+    if (!package && info && extensions) {
+      package = extensions['x-java-package'];
     }
 
     if (package) {
@@ -48,21 +46,32 @@ module.exports = register => {
     // Rename the pom file if necessary, and only include Application.java when an app is requested.
     let artifactType = generator.templateParams['artifactType'];
 
-    if (!artifactType || artifactType === "library") {
+    let mainClassName = "Application";
+    let overrideClassName;
+    if (extensions && extensions['x-java-class']) {
+      overrideClassName = extensions['x-java-class'] + ".java";
+    }
+
+    if (artifactType === "library") {
       fs.renameSync(path.resolve(generator.targetDir, "pom.lib"), path.resolve(generator.targetDir, "pom.xml"));
       fs.unlinkSync(path.resolve(generator.targetDir, "pom.app"));
       fs.unlinkSync(path.resolve(sourcePath, "Application.java"));
-      fs.unlinkSync(path.resolve(sourcePath, "ApplicationWithMessaging.java"));
+      //fs.unlinkSync(path.resolve(sourcePath, "ApplicationWithMessaging.java"));
     } else {
       fs.renameSync(path.resolve(generator.targetDir, "pom.app"), path.resolve(generator.targetDir, "pom.xml"));
       fs.unlinkSync(path.resolve(generator.targetDir, "pom.lib"));
 
+      if (overrideClassName) {
+        fs.renameSync(path.resolve(sourcePath, "Application.java"), path.resolve(sourcePath, overrideClassName));
+      }
+
+      /*
       if (generateMessagingClass) {
-        console.log("App with messaging....");
-        fs.renameSync(path.resolve(sourcePath, "ApplicationWithMessaging.java"), path.resolve(sourcePath, "Application.java"));
+        fs.renameSync(path.resolve(sourcePath, "ApplicationWithMessaging.java"), path.resolve(sourcePath, overrideClassName));
       } else {
         fs.unlinkSync(path.resolve(sourcePath, "ApplicationWithMessaging.java"));
       }
+      */
     }
 
     // Rename the README file.

@@ -4,6 +4,29 @@
 {% set indent2 = indentLevel | indent2 -%}
 {% set indent3 = indentLevel | indent3 -%}
 {{ indent1 }}public {% if isStatic %}static {% endif %} class {{ className }} {
+
+{{ indent2 }}public {{ className }} () {
+{{ indent2 }}}
+
+{% set first = true %}
+{{ indent2 }}public {{ className }} (
+{%- for name, prop in properties -%}
+{%- set name = name | camelCase -%}
+{%- set typeInfo = [name, prop] | fixType -%}
+{%- set type = typeInfo[0] -%}
+{%- if first -%}
+{%- set first = false -%}
+{%- else -%}
+, {% endif -%}
+{{ type }} {{ name }}
+{%- endfor -%}
+) {
+{% for name, prop in properties -%}
+{%- set name = name | camelCase -%}
+{{ indent3 }}this.{{ name }} = {{ name }};
+{% endfor -%}
+{{ indent2 }}}
+
 {% for name, prop in properties -%}
 {% set name = name | camelCase -%}
 {% set typeInfo = [name, prop] | fixType -%}
