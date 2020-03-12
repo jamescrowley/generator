@@ -23,7 +23,7 @@ public class {{ className }} {
 	}
 
 
-{%- set funcs = asyncapi | functions %}
+{%- set funcs = [asyncapi, params] | functions %}
 {% for funcName, funcSpec in funcs %}
     @Bean
 	{{ funcSpec.functionSignature | safe }} {

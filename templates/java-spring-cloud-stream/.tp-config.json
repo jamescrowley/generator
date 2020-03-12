@@ -40,6 +40,10 @@
       "description": "The client password connection property. Currently this only works with the Solace binder.",
       "required": false
     },
+    "reactive": {
+      "description": "If true, this will generate reactive style functions using the Flux class. Defalt: false.",
+      "required": false
+    },
     "solaceSpringCloudVersion": {
       "description": "The version of the solace-spring-cloud-bom dependency used when generating an application. Alternatively you can set the specification extension info.x-solace-spring-cloud-version.",
       "required": false

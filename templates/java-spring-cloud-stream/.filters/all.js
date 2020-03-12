@@ -36,6 +36,7 @@ module.exports = ({ Nunjucks }) => {
     subscribeChannel;
     publishPayload;
     subscribePayload;
+    reactive;
 
     get publishBindingName() {
       return this.name + "-out-0";
@@ -49,13 +50,25 @@ module.exports = ({ Nunjucks }) => {
       var ret = '';
       switch(this.type) {
         case 'function':
-          ret = `public Function<Flux<${this.subscribePayload}>, Flux<${this.publishPayload}>> ${this.name}()`;
+          if (this.reactive) {
+            ret = `public Function<Flux<${this.subscribePayload}>, Flux<${this.publishPayload}>> ${this.name}()`;
+          } else {
+            ret = `public Function<${this.subscribePayload}, ${this.publishPayload}> ${this.name}()`;
+          }
           break;
         case 'supplier':
-          ret = `public Supplier<${this.publishPayload}> ${this.name}()`;
+          if (this.reactive) {
+            ret = `public Supplier<Flux<${this.publishPayload}>> ${this.name}()`;
+          } else {
+            ret = `public Supplier<${this.publishPayload}> ${this.name}()`;
+          }
           break;
         case 'consumer':
-          ret = `public Consumer<${this.subscribePayload}> ${this.name}()`;
+          if (this.reactive) {
+            ret = `public Consumer<Flux<${this.subscribePayload}>> ${this.name}()`;
+          } else {
+            ret = `public Consumer<${this.subscribePayload}> ${this.name}()`;
+          }
           break;
         default:
           throw new Error(`Can't determine the function signature for ${this.name} because the type is ${this.type}`);
@@ -86,8 +99,8 @@ module.exports = ({ Nunjucks }) => {
     doc.spring.cloud.stream = {};
     let scs = doc.spring.cloud.stream;
     scs.function = {};
-    scs.function.definition = getFunctionDefinitions(asyncapi);
-    scs.bindings = getBindings(asyncapi);
+    scs.function.definition = getFunctionDefinitions(asyncapi, params);
+    scs.bindings = getBindings(asyncapi, params);
 
     if (params.binder === 'solace') {
       let additionalSubs = getAdditionalSubs(asyncapi);
@@ -134,7 +147,7 @@ module.exports = ({ Nunjucks }) => {
 
   // This determines the base function name that we will use for the SCSt mapping between functions and bindings.
   Nunjucks.addFilter('functionName', ([channelName, channel]) => {
-    return getFunctionNameOld(channelName, channel);
+    return getFunctionNameByChannel(channelName, channel);
   })
 
   Nunjucks.addFilter('indent1', (numTabs) => {
@@ -196,8 +209,8 @@ module.exports = ({ Nunjucks }) => {
     return [ret, isArrayOfObjects];
   })
 
-  Nunjucks.addFilter('functions', (asyncapi) => {
-    return getFunctionSpecs(asyncapi);
+  Nunjucks.addFilter('functions', ([asyncapi, params]) => {
+    return getFunctionSpecs(asyncapi, params);
   });
 
   Nunjucks.addFilter('groupId', ([info, params]) => {
@@ -266,7 +279,7 @@ module.exports = ({ Nunjucks }) => {
       let channelJson = channel._json;
       
       if (channelJson.subscribe) {
-        let functionName = getFunctionNameOld(channelName, channel);
+        let functionName = getFunctionName(channelName, channelJson.subscribe, true);
         let topicInfo = getTopicInfo(channelName, channel);
         let queue = channelJson.subscribe['x-scs-destination'];
         if (topicInfo.hasParams || queue) {
@@ -286,9 +299,9 @@ module.exports = ({ Nunjucks }) => {
   }
 
   // This returns the SCSt bindings config that will appear in application.yaml.
-  function getBindings(asyncapi ) {
+  function getBindings(asyncapi, params) {
     let ret = {};
-    let funcs = getFunctionSpecs(asyncapi);
+    let funcs = getFunctionSpecs(asyncapi, params);
 
     funcs.forEach((spec, name, map) => {
       if (spec.isPublisher) {
@@ -300,52 +313,6 @@ module.exports = ({ Nunjucks }) => {
         ret[spec.subscribeBindingName].destination = spec.subscribeChannel;
       }
     });
-    return ret;
-  }
-
-  // This returns the SCSt bindings config that will appear in application.yaml.
-  function getBindingsOld(asyncapi, params) {
-    let ret = {};
-
-    for (let channelName in asyncapi.channels()) {
-      let channel = asyncapi.channels()[channelName];
-      let channelJson = channel._json;
-      let functionName = getFunctionNameOld(channelName, channel);
-      //console.log("topicFunc: " + topicFunc);
-      //console.log("channelName: " + channelName);
-      //console.log("channelJson: " + channelJson);
-      let topicInfo = getTopicInfo(channelName, channel);
-      // if there are topic parameters, it doesn't make sense to include the publish destination.
-      if (channelJson.publish && !topicInfo.hasParams) {
-        bindingName = functionName + "Supplier-out-0";
-        ret[bindingName] = {};
-        ret[bindingName].destination = channelName;
-      }
-      if (channelJson.subscribe) {
-        //console.log("sub: " + JSON.stringify(channelJson.subscribe));
-        let subDestination;
-        let group = channelJson.subscribe['x-scs-group'];
-        let queue = channelJson.subscribe['x-scs-destination'];
-        //console.log('channel ' + channelName + ' group: ' + group + ' queue: ' + queue  );
-
-        if (queue && params.binder === 'solace') {
-          subDestination = queue;
-        }
-
-        if (topicInfo.hasParams && !subDestination) {
-          throw new Error("channel " + channelName + " has parameters but no queue has been specified. A queue is required when a topic has parameters. Add a value: channel.subscribe.x-scs-destination");
-        }
-
-        subDestination = subDestination || topicInfo.subscribeTopic;
-        bindingName = functionName + "Consumer-in-0";
-        ret[bindingName] = {};
-        ret[bindingName].destination = subDestination;
-        if (group) {
-          ret[bindingName].group = group;
-        }
-      }
-    }
-
     return ret;
   }
 
@@ -364,7 +331,7 @@ module.exports = ({ Nunjucks }) => {
   }
 
   // This returns the base function name that SCSt will use to map functions with bindings.
-  function getFunctionNameOld(channelName, channel) {
+  function getFunctionNameByChannel(channelName, channel) {
     let ret = _.camelCase(channelName);
     let channelJson = channel._json;
     //console.log('functionName channel: ' + JSON.stringify(channelJson));
@@ -377,17 +344,18 @@ module.exports = ({ Nunjucks }) => {
   }
 
   // This returns the string that gets rendered in the function.definition part of application.yaml.
-  function getFunctionDefinitions(asyncapi) {
+  function getFunctionDefinitions(asyncapi, params) {
     let ret = "";
-    let funcs = getFunctionSpecs(asyncapi);
+    let funcs = getFunctionSpecs(asyncapi, params);
     let names = funcs.keys();
     ret = Array.from(names).join(";");
     return ret;
   }
 
-  function getFunctionSpecs(asyncapi) {
+  function getFunctionSpecs(asyncapi, params) {
     // This maps function names to SCS function definitions.
     const functionMap = new Map();
+    const reactive = params.reactive === 'true';
 
     for (let channelName in asyncapi.channels()) {
       let channel = asyncapi.channels()[channelName];
@@ -404,7 +372,8 @@ module.exports = ({ Nunjucks }) => {
         } else {
           functionSpec = new SCSFunction();
           functionSpec.name = name;
-          functionSpec.type = 'supplier'
+          functionSpec.type = 'supplier';
+          functionSpec.reactive = reactive;
           functionMap.set(name, functionSpec);
         }
         let payload = getPayloadClass(channel.publish());
@@ -426,6 +395,7 @@ module.exports = ({ Nunjucks }) => {
           functionSpec = new SCSFunction();
           functionSpec.name = name;
           functionSpec.type = 'consumer';
+          functionSpec.reactive = reactive;
           functionMap.set(name, functionSpec);
         }
         let payload = getPayloadClass(channel.subscribe());
