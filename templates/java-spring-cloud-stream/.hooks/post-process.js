@@ -37,10 +37,15 @@ module.exports = register => {
 
         if ((file != 'Messaging.java') || generateMessagingClass) {
           fs.copyFileSync(path.resolve(sourcePath, file), path.resolve(overridePath, file));
+          //console.log("Copying " + file)
         }
         fs.unlinkSync(path.resolve(sourcePath, file));
       })
       sourcePath = overridePath;
+    } else {
+      if (!generateMessagingClass) {
+        fs.unlinkSync(path.resolve(sourcePath, 'Messaging.java'));
+      }
     }
 
     // Rename the pom file if necessary, and only include Application.java when an app is requested.

@@ -321,7 +321,11 @@ module.exports = ({ Nunjucks }) => {
     let ret;
     //console.log('functionName operation: ' + JSON.stringify(operation));
     let functionName = operation['x-scs-function-name'];
-    //console.log('function name for operation ' + channelName + ': ' + functionName);
+
+    if (!functionName) {
+      functionName = operation.operationId;
+    }
+
     if (functionName) {
       ret = functionName;
     } else {
@@ -360,6 +364,9 @@ module.exports = ({ Nunjucks }) => {
     for (let channelName in asyncapi.channels()) {
       let channel = asyncapi.channels()[channelName];
       let channelJson = channel._json;
+      //console.log("=====================================");
+      //console.log("channelJson: " + JSON.stringify(channelJson));
+      //console.log("=====================================");
       let functionSpec;
       if (channelJson.publish) {
         let name = getFunctionName(channelName, channelJson.publish, false);

@@ -6,7 +6,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
+{%- if params.reactive === 'true' %}
 import reactor.core.publisher.Flux;
+{%- endif %}
 
 import java.util.function.Function;
 import java.util.function.Consumer;
@@ -25,7 +27,7 @@ public class {{ className }} {
 
 {%- set funcs = [asyncapi, params] | functions %}
 {% for funcName, funcSpec in funcs %}
-    @Bean
+	@Bean
 	{{ funcSpec.functionSignature | safe }} {
 		// Add business logic here.
 		return null;
