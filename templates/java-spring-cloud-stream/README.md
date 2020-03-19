@@ -9,6 +9,8 @@ When generating an application, you can set the parameter ```binder={binderType}
 
 The template works as follows: for each channel, if there is a publisher operation, a Supplier method will be generated. If there is a subscriber operation, a Provider method will get generated. It is possible to have a Function method as well.
 
+Note that this template interprets the AsyncAPI document from the perspective of an application, not an API. This means that when the template sees a subscribe operation, it generates code to subscribe to a topic, not publish to one.
+
 The methods are named as follows. For each operation (i.e. publish or subscribe in each channel), the template looks for the specification extention `x-scs-function-name```. If present, it uses that to name the function. Of one publish operation and one subscribe operation both share the same x-scs-function-name value then a Function method is generated that takes a message from the subscribe operation and publishes it to the publisher operation.
 
 It is an error for more than one subscribe operation or more than one publish operation to share the same x-scs-function-name attribute.
