@@ -145,6 +145,12 @@ module.exports = ({ Nunjucks }) => {
     return _.camelCase(str);
   })
 
+  Nunjucks.addFilter('dump', (str) => {
+    console.log("Dumping " + str);
+    return str;
+  })
+
+
   // This determines the base function name that we will use for the SCSt mapping between functions and bindings.
   Nunjucks.addFilter('functionName', ([channelName, channel]) => {
     return getFunctionNameByChannel(channelName, channel);
@@ -164,6 +170,8 @@ module.exports = ({ Nunjucks }) => {
 
   // This returns the proper Java type for a schema property.
   Nunjucks.addFilter('fixType', ([name, property]) => {
+
+    console.log('fixType: ' + name);
     
     let isArrayOfObjects = false;
 
@@ -188,6 +196,9 @@ module.exports = ({ Nunjucks }) => {
         ret = property.title();
       }
     } else if (type === 'array') {
+      if (!property._json.items) {
+        throw new Error("Array named " + name + " must have an 'items' property to indicate what type the array elements are.");
+      }
       //console.log('fixtype: ' + JSON.stringify(propery._json.items));
       let itemsType = property._json.items.type;
       if (itemsType) {
